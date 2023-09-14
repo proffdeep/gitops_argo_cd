@@ -1,0 +1,84 @@
+pipeline{
+    agent any
+
+    environment {
+        DOCKERHUB_USERNAME = "deepch98"
+        APP_NAME = "gitops-argocd"
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        IMAGE_NAME = "${DOCKERHUB_USERNAME}" + "/" +  "${APP_NAME}"
+        REGISTRY_CREDS = 'dockerhub'
+    }
+
+    stages{
+        stage('Cleanup WS'){
+            steps{
+                cleanWs()
+            }
+        }
+        stage('checkout scm'){
+            steps{
+                script{
+                    git credentialsId: 'github2',
+                    url: 'https://github.com/proffdeep/gitops-argocd.git',
+                    branch: 'main'
+                }
+            }
+        }
+
+        stage('Build Docker Image'){
+            steps{
+                script{
+                    docker_image = docker.build "${IMAGE_NAME}"
+                }
+            }
+        }
+        stage('Push docker image'){
+            steps{
+                script{
+                    docker.withRegistry('',REGISTRY_CREDS){
+                        docker_image.push("$BUILD_NUMBER")
+                        docker_image.push('latest')
+                    }
+                }
+            }
+        }
+        stage('delete images'){
+            steps{
+                script{
+                    sh "docker rmi ${IMAGE_NAME}:${IMAGE_TAG}"
+                    sh "docker rmi ${IMAGE_NAME}:latest"
+                }
+            }
+        }
+
+        stage('updating kubernetes deployment file'){
+            steps{
+                script{
+                    sh """
+                    sed -i 's/${APP_NAME}.*/${APP_NAME}:${IMAGE_TAG}/g' deployment.yml
+                    cat deployment.yml
+                    """
+                }
+            }
+        }
+        stage('push the changed deployment file to git'){
+            steps{
+                script{
+                    sh """
+                    git config --global user.name "proffdeep"
+                    git config --global user.email "deepch98@gmail.com"
+                    git add deployment.yml
+                    git commit -m "add updated deployment file to GH"
+                    """
+                    withCredentials([gitUsernamePassword(credentialsId: 'github', gitToolName: 'Default')]) {
+                              sh "git push -u origin main"
+                                }
+                }
+            }
+        }
+
+    }
+}
+
+// HWztv43c1vTg1fHC
+//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
